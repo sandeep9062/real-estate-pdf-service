@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        :root { --primary: #4161df; --dark: #1f2937; --light: #6b7280; --border: #e2e8f0; --bg: #f8fafc; }
+        
+        @page { size: A4; margin: 0; }
+        body { font-family: 'Helvetica', 'Arial', sans-serif; margin: 0; padding: 0; color: var(--dark); -webkit-print-color-adjust: exact; }
+        
+        .page { padding: 40px 50px; min-height: 100vh; position: relative; box-sizing: border-box; background: white; }
+        
+        /* Header */
+        .header { 
+            border-bottom: 2px solid var(--primary); 
+            padding-bottom: 15px; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: flex-end; 
+        }
+        .logo { font-size: 30px; font-weight: 900; color: var(--primary); text-transform: uppercase; letter-spacing: -1.5px; line-height: 1; }
+        .ref-tag { font-size: 10px; color: var(--light); text-align: right; line-height: 1.4; font-weight: 600; }
+
+        /* Dynamic Gallery Logic */
+        .gallery-section { margin-top: 25px; }
+        
+        /* Layout for 1 Image */
+        .single-hero { width: 100%; height: 380px; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 20px rgba(0,0,0,0.05); background: var(--bg); display: flex; align-items: center; justify-content: center; color: var(--light); font-size: 14px; }
+        .single-hero img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        
+        /* Layout for Multi-Images (2-5) */
+        .gallery-grid { 
+            display: grid; 
+            grid-template-columns: repeat(4, 1fr); 
+            grid-template-rows: 300px 120px; 
+            gap: 12px; 
+        }
+        .img-box { border-radius: 15px; overflow: hidden; background: var(--bg); display: flex; align-items: center; justify-content: center; color: var(--light); font-size: 12px; }
+        .img-box img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .img-main { grid-column: 1 / span 4; }
+        .img-sub { grid-row: 2; }
+
+        /* Main Info Bar */
+        .main-info { margin-top: 30px; display: flex; justify-content: space-between; align-items: flex-start; }
+        .title { font-size: 24px; font-weight: 800; color: #111827; margin: 0; flex: 1; padding-right: 20px; }
+        .price-box { text-align: right; }
+        .price-label { font-size: 9px; text-transform: uppercase; color: var(--light); font-weight: 700; margin-bottom: 2px; }
+        .price { font-size: 26px; color: var(--primary); font-weight: 900; line-height: 1; }
+
+        /* Specs Grid */
+        .specs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 25px; }
+        .spec-item { background: var(--bg); padding: 15px 10px; border-radius: 12px; text-align: center; border: 1px solid var(--border); }
+        .spec-label { font-size: 9px; text-transform: uppercase; color: var(--light); font-weight: 800; margin-bottom: 4px; }
+        .spec-value { font-size: 13px; font-weight: 700; color: #1e293b; }
+
+        /* Description */
+        .description-box { margin-top: 35px; }
+        .section-label { font-size: 12px; font-weight: 800; color: var(--primary); text-transform: uppercase; border-left: 4px solid var(--primary); padding-left: 12px; margin-bottom: 12px; letter-spacing: 0.5px; }
+        .description-text { font-size: 12px; line-height: 1.7; color: #4b5563; text-align: justify; }
+
+      
+        /* Footer */
+        .footer { 
+            position: absolute; bottom: 40px; left: 50px; right: 50px; 
+            border-top: 1px solid var(--border); padding-top: 20px; 
+            display: flex; justify-content: space-between; align-items: center; 
+        }
+        .agent-info { font-size: 11px; line-height: 1.5; color: #374151; }
+        .brand-footer { font-size: 11px; color: var(--light); text-align: right; font-weight: 600; }
+        
+        .watermark { 
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-45deg); 
+            font-size: 100px; color: rgba(65, 97, 223, 0.03); font-weight: 900; z-index: -1; white-space: nowrap; 
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="watermark">PROPERTY BULBUL</div>
+
+        <div class="header">
+            <div class="logo">PropertyBulbul</div>
+            <div class="ref-tag">
+                VERIFIED PROPERTY<br>
+                REF: <%= property._id ? property._id.toString().substring(0,8).toUpperCase() : 'PROPERTY001' %>
+            </div>
+        </div>
+
+        <div class="gallery-section">
+            <% if (property.image && property.image.length === 1) { %>
+                <div class="single-hero">
+                    <img src="<%= property.image[0] %>" style="width:100%; height:100%; object-fit:cover;">
+                </div>
+            <% } else if (property.image && property.image.length > 1) { %>
+                <div class="gallery-grid">
+                    <div class="img-box img-main">
+                        <img src="<%= property.image[0] %>">
+                    </div>
+                    <% for(let i = 1; i <= 4; i++) { %>
+                        <% if (property.image[i]) { %>
+                            <div class="img-box img-sub">
+                                <img src="<%= property.image[i] %>">
+                            </div>
+                        <% } %>
+                    <% } %>
+                </div>
+            <% } %>
+        </div>
+
+        <div class="main-info">
+            <h1 class="title"><%= property.title %></h1>
+            <div class="price-box">
+                <div class="price-label">Estimated Price</div>
+                <div class="price">₹<%= property.price.toLocaleString('en-IN') %></div>
+            </div>
+        </div>
+
+        <div class="specs">
+            <div class="spec-item">
+                <div class="spec-label">Bedrooms</div>
+                <div class="spec-value"><%= property.facilities.bedrooms %> BHK</div>
+            </div>
+            <div class="spec-item">
+                <div class="spec-label">Area</div>
+                <div class="spec-value"><%= property.area.value %> <%= property.area.unit %></div>
+            </div>
+            <div class="spec-item">
+                <div class="spec-label">Facing</div>
+                <div class="spec-value"><%= property.facing || 'Open' %></div>
+            </div>
+            <div class="spec-item">
+                <div class="spec-label">Status</div>
+                <div class="spec-value"><%= property.availability %></div>
+            </div>
+        </div>
+
+       
+
+        <div class="description-box">
+            <div class="section-label">Professional Overview</div>
+            <div class="description-text">
+                <%= property.description %>
+            </div>
+        </div>
+
+        <div class="footer">
+            <div class="agent-info">
+                <strong>Inquiry Contact:</strong><br>
+                <%= property.user && property.user.email ? property.user.email : 'Contact via PropertyBulbul' %>
+            </div>
+            <div class="brand-footer">
+                Official Listing Brochure<br>
+                <strong>propertybulbul.com</strong>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
