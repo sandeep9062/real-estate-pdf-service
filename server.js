@@ -3,26 +3,29 @@ import puppeteer from "puppeteer";
 import ejs from "ejs";
 import path from "path";
 import { fileURLToPath } from "url";
+import cors from "cors"; // Added for better connectivity
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 
-// Increase limit because HTML with Base64 images can be large
+// Enable CORS so your main domain can talk to this subdomain
+app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
 let browser;
 
-// High-Performance Browser Management
 const getBrowser = async () => {
   if (!browser || !browser.connected) {
     browser = await puppeteer.launch({
       headless: "new",
+      // Use the Docker-installed Chrome on Render
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage", // Critical for Render's low memory
+        "--disable-dev-shm-usage",
         "--disable-gpu",
-        "--single-process", // Saves RAM
+        "--single-process",
         "--no-zygote",
       ],
     });
@@ -30,6 +33,17 @@ const getBrowser = async () => {
   }
   return browser;
 };
+
+// --- NEW ROOT ROUTE ---
+app.get("/", (req, res) => {
+  res.status(200).send(`
+    <div style="font-family: sans-serif; text-align: center; padding-top: 50px;">
+      <h1>🚀 Property Bulbul PDF Service</h1>
+      <p>Status: <span style="color: green;">Online</span></p>
+      <p>Endpoint: <code>POST /generate-brochure</code></p>
+    </div>
+  `);
+});
 
 app.post("/generate-brochure", async (req, res) => {
   const { property } = req.body;
@@ -39,15 +53,11 @@ app.post("/generate-brochure", async (req, res) => {
     const b = await getBrowser();
     page = await b.newPage();
 
-    // 1. Render EJS to HTML string
     const templatePath = path.join(__dirname, "views", "brochureTemplate.ejs");
     const html = await ejs.renderFile(templatePath, { property });
 
-    // 2. Set Content & Wait for Images/Fonts
-    // 'networkidle0' ensures everything is loaded before printing
     await page.setContent(html, { waitUntil: "networkidle0", timeout: 30000 });
 
-    // 3. Generate PDF
     const pdfBuffer = await page.pdf({
       format: "A4",
       printBackground: true,
@@ -61,11 +71,10 @@ app.post("/generate-brochure", async (req, res) => {
     console.error("PDF Error:", error);
     res.status(500).json({ error: "Failed to generate PDF" });
   } finally {
-    if (page) await page.close(); // Close the tab, but NOT the browser
+    if (page) await page.close();
   }
 });
 
-// Health check for Render to know the service is awake
 app.get("/ping", (req, res) => res.send("pong"));
 
 const PORT = process.env.PORT || 10000;
