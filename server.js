@@ -13,27 +13,26 @@ app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
 let browser;
-
 const getBrowser = async () => {
   if (!browser || !browser.connected) {
     browser = await puppeteer.launch({
       headless: "new",
-      // Use the Docker-installed Chrome on Render
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
+      // REMOVE or COMMENT OUT the executablePath line
+      // executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
         "--disable-gpu",
-        "--single-process",
         "--no-zygote",
+        // Keep single-process for memory management on Free Tier
+        "--single-process",
       ],
     });
     console.log("🚀 Browser Instance Started");
   }
   return browser;
 };
-
 // --- NEW ROOT ROUTE ---
 app.get("/", (req, res) => {
   res.status(200).send(`
