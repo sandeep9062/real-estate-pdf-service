@@ -1,23 +1,23 @@
 FROM ghcr.io/puppeteer/puppeteer:latest
 
-# 1. We still skip the download because the image ALREADY has Chrome
+# 1. Skip downloading Chromium since the image has it
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 
 USER root
 WORKDIR /app
 
-# 2. Copy package files and install
+# 2. Copy only package files first
 COPY package*.json ./
-RUN npm install --omit=dev
 
-# 3. Copy the rest of your code
+# 3. Use 'npm ci' with --no-audit to save memory and speed up the build
+RUN npm ci --omit=dev --no-audit
+
+# 4. Copy the rest
 COPY . .
 
-# 4. Fix permissions so the 'pptruser' can read your EJS files
 RUN chmod -R 755 /app/views
 RUN chown -R pptruser:pptruser /app
 
-# 5. Switch to the built-in non-root user (Security Best Practice)
 USER pptruser
 
 EXPOSE 10000
