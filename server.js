@@ -52,11 +52,13 @@ app.post("/generate-brochure", async (req, res) => {
     const options = {
       format: "A4",
       printBackground: true,
+      timeout: 120000, // increase to 2 minutes
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
         "--disable-gpu",
+        "--no-zygote",
       ],
     };
 
