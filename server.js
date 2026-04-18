@@ -52,7 +52,13 @@ app.post("/generate-brochure", async (req, res) => {
     const options = {
       format: "A4",
       printBackground: true,
-      timeout: 240000, // increase to 2 minutes
+      margin: {
+        top: "20px",
+        right: "20px",
+        bottom: "20px",
+        left: "20px",
+      },
+
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
