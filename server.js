@@ -8,44 +8,56 @@ import cors from "cors";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 
-// Enable CORS for your main backend/frontend domains
 app.use(cors());
-app.use(express.json({ limit: "15mb" })); // Increased limit for high-res image data
+app.use(express.json({ limit: "15mb" }));
 
-let browser;
+let browser = null;
 
 /**
- * High-Performance Browser Management
- * Uses the built-in pptr executablePath to avoid ENOENT errors on Render
+ * Robust Browser Management
+ * - Checks if browser is truly alive before reusing
+ * - Resets to null on any failure so next request gets a fresh instance
  */
 const getBrowser = async () => {
-  try {
-    if (!browser || !browser.connected) {
-      browser = await puppeteer.launch({
-        headless: "new",
-        // CRITICAL FIX: Automatically finds Chrome in the Docker environment
-        executablePath: puppeteer.executablePath(),
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-gpu",
-          "--no-zygote",
-          "--single-process", // Essential for Render Free Tier (512MB RAM)
-        ],
-      });
-      console.log(
-        `🚀 Browser Instance Started at: ${puppeteer.executablePath()}`,
-      );
+  // Check if existing browser is still alive
+  if (browser) {
+    try {
+      await browser.pages(); // Will throw if browser has crashed
+    } catch {
+      console.warn("⚠️  Browser was dead, restarting...");
+      browser = null;
     }
-    return browser;
-  } catch (err) {
-    console.error("❌ Failed to launch browser:", err);
-    throw err;
   }
+
+  if (!browser) {
+    browser = await puppeteer.launch({
+      headless: "new",
+      executablePath: puppeteer.executablePath(),
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--no-zygote",
+        "--single-process", // Essential for Render Free Tier (512MB RAM)
+        "--disable-extensions",
+        "--disable-background-networking",
+        "--disable-default-apps",
+      ],
+    });
+    console.log(`🚀 Browser launched: ${puppeteer.executablePath()}`);
+
+    // If browser crashes unexpectedly, reset so next request relaunches it
+    browser.on("disconnected", () => {
+      console.warn("⚠️  Browser disconnected — will relaunch on next request");
+      browser = null;
+    });
+  }
+
+  return browser;
 };
 
-// Professional Root Route
+// Root health check
 app.get("/", (req, res) => {
   res.status(200).send(`
     <div style="font-family: sans-serif; text-align: center; padding-top: 50px;">
@@ -65,22 +77,45 @@ app.post("/generate-brochure", async (req, res) => {
     return res.status(400).json({ error: "Property data is required" });
   }
 
-  let page;
+  // Validate required fields to avoid cryptic errors in the template
+  if (!property.title || !property.price) {
+    return res
+      .status(400)
+      .json({ error: "Property must have title and price" });
+  }
+
+  let page = null;
+
   try {
     const b = await getBrowser();
     page = await b.newPage();
 
-    // Set a reasonable viewport for the render
+    // Block unnecessary resources to speed up rendering on free tier
+    await page.setRequestInterception(true);
+    page.on("request", (req) => {
+      const type = req.resourceType();
+      // Only block fonts and media — allow images (needed for property photos)
+      if (["font", "media"].includes(type)) {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
+
     await page.setViewport({ width: 1280, height: 800 });
 
     const templatePath = path.join(__dirname, "views", "brochureTemplate.ejs");
     const html = await ejs.renderFile(templatePath, { property });
 
-    // 'load' is safer for Cloudinary images on Render's Free Tier
+    // networkidle0 waits for all Cloudinary images to fully load
+    // Falls back gracefully if an image fails
     await page.setContent(html, {
-      waitUntil: "load",
+      waitUntil: "networkidle0",
       timeout: 60000,
     });
+
+    // Extra wait to ensure images are painted before PDF capture
+    await new Promise((resolve) => setTimeout(resolve, 500));
 
     const pdfBuffer = await page.pdf({
       format: "A4",
@@ -89,26 +124,55 @@ app.post("/generate-brochure", async (req, res) => {
       margin: { top: "0", right: "0", bottom: "0", left: "0" },
     });
 
-    res.contentType("application/pdf");
-    // Explicitly set headers for filename
-    res.setHeader("Content-Disposition", "attachment; filename=brochure.pdf");
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="brochure-${property._id || "property"}.pdf"`,
+    );
     res.send(pdfBuffer);
+
+    console.log(`✅ PDF generated for: ${property.title}`);
   } catch (error) {
     console.error("🚨 PDF Generation Error:", error.message);
+
+    // If browser crashed mid-request, reset it
+    if (
+      error.message.includes("Target closed") ||
+      error.message.includes("Session closed") ||
+      error.message.includes("Protocol error")
+    ) {
+      browser = null;
+      console.warn("⚠️  Browser reset due to crash");
+    }
+
     res.status(500).json({
       error: "Failed to generate PDF",
       details: error.message,
     });
   } finally {
+    // Always close the page to free memory — never close the browser itself
     if (page) {
-      await page
-        .close()
-        .catch((err) => console.error("Error closing page:", err));
+      await page.close().catch((err) => {
+        console.error("Error closing page:", err.message);
+      });
     }
   }
 });
 
+// Lightweight ping for uptime monitoring (e.g. UptimeRobot)
 app.get("/ping", (req, res) => res.status(200).send("pong"));
+
+// Graceful shutdown — close browser on process exit
+const shutdown = async () => {
+  console.log("🛑 Shutting down...");
+  if (browser) {
+    await browser.close().catch(() => {});
+  }
+  process.exit(0);
+};
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {

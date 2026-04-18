@@ -1,24 +1,21 @@
 FROM ghcr.io/puppeteer/puppeteer:latest
 
-# 1. Skip downloading Chromium since the image has it
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV NODE_ENV=production
 
-USER root
 WORKDIR /app
 
-# 2. Copy only package files first
+# Copy package files (both package.json AND package-lock.json)
 COPY package*.json ./
 
-# 3. Use 'npm ci' with --no-audit to save memory and speed up the build
+# Install dependencies
 RUN npm ci --omit=dev --no-audit
 
-# 4. Copy the rest
+# Copy app files
 COPY . .
 
+# Fix permissions for views folder
 RUN chmod -R 755 /app/views
-RUN chown -R pptruser:pptruser /app
-
-USER pptruser
 
 EXPOSE 10000
 
