@@ -52,6 +52,8 @@ app.post("/generate-brochure", async (req, res) => {
     const options = {
       format: "A4",
       printBackground: true,
+      waitUntil: "domcontentloaded",
+      timeout: 60000,
       margin: {
         top: "20px",
         right: "20px",
