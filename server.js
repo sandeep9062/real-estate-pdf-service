@@ -13,16 +13,10 @@ app.use(express.json({ limit: "15mb" }));
 
 let browser = null;
 
-/**
- * Robust Browser Management
- * - Checks if browser is truly alive before reusing
- * - Resets to null on any failure so next request gets a fresh instance
- */
 const getBrowser = async () => {
-  // Check if existing browser is still alive
   if (browser) {
     try {
-      await browser.pages(); // Will throw if browser has crashed
+      await browser.pages();
     } catch {
       console.warn("⚠️  Browser was dead, restarting...");
       browser = null;
@@ -39,15 +33,30 @@ const getBrowser = async () => {
         "--disable-dev-shm-usage",
         "--disable-gpu",
         "--no-zygote",
-        "--single-process", // Essential for Render Free Tier (512MB RAM)
         "--disable-extensions",
         "--disable-background-networking",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-breakpad",
+        "--disable-client-side-phishing-detection",
         "--disable-default-apps",
+        "--disable-hang-monitor",
+        "--disable-popup-blocking",
+        "--disable-prompt-on-repost",
+        "--disable-sync",
+        "--disable-translate",
+        "--metrics-recording-only",
+        "--no-first-run",
+        "--safebrowsing-disable-auto-update",
+        "--password-store=basic",
+        "--use-mock-keychain",
+        "--font-render-hinting=none",
+        "--shm-size=1gb",
       ],
     });
+
     console.log(`🚀 Browser launched: ${puppeteer.executablePath()}`);
 
-    // If browser crashes unexpectedly, reset so next request relaunches it
     browser.on("disconnected", () => {
       console.warn("⚠️  Browser disconnected — will relaunch on next request");
       browser = null;
@@ -57,7 +66,6 @@ const getBrowser = async () => {
   return browser;
 };
 
-// Root health check
 app.get("/", (req, res) => {
   res.status(200).send(`
     <div style="font-family: sans-serif; text-align: center; padding-top: 50px;">
@@ -77,8 +85,7 @@ app.post("/generate-brochure", async (req, res) => {
     return res.status(400).json({ error: "Property data is required" });
   }
 
-  // Validate required fields to avoid cryptic errors in the template
-  if (!property.title || !property.price) {
+  if (!property.title || property.price === undefined) {
     return res
       .status(400)
       .json({ error: "Property must have title and price" });
@@ -90,15 +97,18 @@ app.post("/generate-brochure", async (req, res) => {
     const b = await getBrowser();
     page = await b.newPage();
 
-    // Block unnecessary resources to speed up rendering on free tier
+    const pageTimeout = setTimeout(async () => {
+      console.warn("⚠️  Page timeout — force closing");
+      await page.close().catch(() => {});
+    }, 30000);
+
     await page.setRequestInterception(true);
-    page.on("request", (req) => {
-      const type = req.resourceType();
-      // Only block fonts and media — allow images (needed for property photos)
-      if (["font", "media"].includes(type)) {
-        req.abort();
+    page.on("request", (interceptedReq) => {
+      const type = interceptedReq.resourceType();
+      if (["font", "media", "websocket"].includes(type)) {
+        interceptedReq.abort();
       } else {
-        req.continue();
+        interceptedReq.continue();
       }
     });
 
@@ -107,15 +117,12 @@ app.post("/generate-brochure", async (req, res) => {
     const templatePath = path.join(__dirname, "views", "brochureTemplate.ejs");
     const html = await ejs.renderFile(templatePath, { property });
 
-    // networkidle0 waits for all Cloudinary images to fully load
-    // Falls back gracefully if an image fails
     await page.setContent(html, {
       waitUntil: "networkidle0",
-      timeout: 60000,
+      timeout: 30000,
     });
 
-    // Extra wait to ensure images are painted before PDF capture
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 800));
 
     const pdfBuffer = await page.pdf({
       format: "A4",
@@ -123,6 +130,8 @@ app.post("/generate-brochure", async (req, res) => {
       preferCSSPageSize: true,
       margin: { top: "0", right: "0", bottom: "0", left: "0" },
     });
+
+    clearTimeout(pageTimeout);
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
@@ -135,14 +144,18 @@ app.post("/generate-brochure", async (req, res) => {
   } catch (error) {
     console.error("🚨 PDF Generation Error:", error.message);
 
-    // If browser crashed mid-request, reset it
     if (
+      error.message.includes("detached") ||
       error.message.includes("Target closed") ||
       error.message.includes("Session closed") ||
-      error.message.includes("Protocol error")
+      error.message.includes("Protocol error") ||
+      error.message.includes("Connection closed")
     ) {
-      browser = null;
       console.warn("⚠️  Browser reset due to crash");
+      try {
+        await browser?.close();
+      } catch {}
+      browser = null;
     }
 
     res.status(500).json({
@@ -150,7 +163,6 @@ app.post("/generate-brochure", async (req, res) => {
       details: error.message,
     });
   } finally {
-    // Always close the page to free memory — never close the browser itself
     if (page) {
       await page.close().catch((err) => {
         console.error("Error closing page:", err.message);
@@ -159,15 +171,11 @@ app.post("/generate-brochure", async (req, res) => {
   }
 });
 
-// Lightweight ping for uptime monitoring (e.g. UptimeRobot)
 app.get("/ping", (req, res) => res.status(200).send("pong"));
 
-// Graceful shutdown — close browser on process exit
 const shutdown = async () => {
   console.log("🛑 Shutting down...");
-  if (browser) {
-    await browser.close().catch(() => {});
-  }
+  if (browser) await browser.close().catch(() => {});
   process.exit(0);
 };
 
