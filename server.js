@@ -65,6 +65,7 @@ app.post("/generate-brochure", async (req, res) => {
         "--disable-dev-shm-usage",
         "--disable-gpu",
         "--no-zygote",
+        "--single-process",
       ],
     };
 
