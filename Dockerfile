@@ -3,19 +3,22 @@ FROM ghcr.io/puppeteer/puppeteer:latest
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV NODE_ENV=production
 
+# Switch to root ONLY to set permissions
+USER root
+
 WORKDIR /app
 
-# Copy package files (both package.json AND package-lock.json)
 COPY package*.json ./
 
-# Install dependencies
 RUN npm ci --omit=dev --no-audit
 
-# Copy app files
 COPY . .
 
-# Fix permissions for views folder
+# Set permissions while still root
 RUN chmod -R 755 /app/views
+
+# Switch back to the puppeteer user for security
+USER pptruser
 
 EXPOSE 10000
 
