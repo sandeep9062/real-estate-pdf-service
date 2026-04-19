@@ -33,4 +33,5 @@ COPY . .
 
 EXPOSE 10000
 
-CMD ["node", "server.js"]
+
+CMD ["node", "--max-old-space-size=450", "server.js"]
