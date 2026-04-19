@@ -35,4 +35,4 @@ EXPOSE 10000
 # Updated CMD: 
 # 1. Added memory limit to Node
 # 2. Ensure your entry file name matches (you used server.js here, make sure it's not index.js)
-CMD ["node", "server.js"]
+CMD ["node", "--max-old-space-size=450", "server.js"]

@@ -53,6 +53,7 @@ app.post("/generate-brochure", async (req, res) => {
     const options = {
       format: "A4",
       printBackground: true,
+      waitUntil: "domcontentloaded",
       margin: { top: "20px", right: "20px", bottom: "20px", left: "20px" },
       args: [
         "--no-sandbox",
