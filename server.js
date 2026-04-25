@@ -2,6 +2,20 @@ import express from "express";
 import cors from "cors";
 import PDFDocument from "pdfkit";
 import axios from "axios";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const iconPath = path.join(__dirname, "images", "bulbul-icon.png");
+let iconBuffer = null;
+try {
+  iconBuffer = fs.readFileSync(iconPath);
+} catch (e) {
+  console.warn("Could not load bulbul-icon.png:", e.message);
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "15mb" }));
@@ -86,11 +100,18 @@ app.post("/generate-brochure", async (req, res) => {
     doc.rect(0, 0, W, H).fill(WHITE);
     // ── HEADER ────────────────────────────────────────────────
     doc.rect(0, 0, W, 56).fill(PRIMARY);
+    const iconSize = 36;
+    const iconY = (56 - iconSize) / 2; // centered vertically in header
+    let textX = M;
+    if (iconBuffer) {
+      doc.image(iconBuffer, M, iconY, { width: iconSize, height: iconSize });
+      textX = M + iconSize + 8;
+    }
     doc
       .fontSize(20)
       .font("Helvetica-Bold")
       .fillColor(WHITE)
-      .text("Property", M, 16, { continued: true })
+      .text("Property", textX, 16, { continued: true })
       .font("Helvetica")
       .text("Bulbul");
     // Verified badge box
