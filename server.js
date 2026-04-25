@@ -393,10 +393,19 @@ app.post("/generate-brochure", async (req, res) => {
       .stroke();
     // Left — contact
     const userImgBuf = await fetchImage(p.user?.image);
-    const profileSize = 28;
+    const userName = p.user?.name;
+    const phone = p.user?.phone || "";
+    const email = p.user?.email || "contact@propertybulbul.com";
+    const contactLine = phone
+      ? `Ph: ${phone}    Email: ${email}`
+      : `Email: ${email}`;
+
+    // --- UPDATED FOOTER ALIGNMENT ---
+    const profileSize = 34; // Slightly larger for better visibility
+    const profileY = footerY + (54 - profileSize) / 2;
     let contactX = M;
+
     if (userImgBuf) {
-      const profileY = footerY + (54 - profileSize) / 2;
       doc.save();
       doc
         .circle(
@@ -408,33 +417,32 @@ app.post("/generate-brochure", async (req, res) => {
       doc.image(userImgBuf, M, profileY, {
         width: profileSize,
         height: profileSize,
+        fit: [profileSize, profileSize],
       });
       doc.restore();
-      contactX = M + profileSize + 10;
+      contactX = M + profileSize + 12; // Added more breathing room
     }
+
+    // Align all text relative to the center of the profile picture
+    const textBaseY = profileY + 2;
+
     doc
-      .fontSize(7)
+      .fontSize(6.5)
+      .font("Helvetica-Bold")
+      .fillColor(LIGHT)
+      .text("INQUIRY CONTACT", contactX, textBaseY);
+
+    doc
+      .fontSize(10)
       .font("Helvetica-Bold")
       .fillColor(DARK)
-      .text("INQUIRY CONTACT", contactX, footerY + 5);
-    const userName = p.user?.name;
-    if (userName) {
-      doc
-        .fontSize(9.5)
-        .font("Helvetica-Bold")
-        .fillColor(DARK)
-        .text(userName, contactX, footerY + 15);
-    }
-    const phone = p.user?.phone || "";
-    const email = p.user?.email || "contact@propertybulbul.com";
-    const contactLine = phone
-      ? `Ph: ${phone}    Email: ${email}`
-      : `Email: ${email}`;
+      .text(userName || "Authorized Agent", contactX, textBaseY + 9);
+
     doc
       .fontSize(8)
       .font("Helvetica")
       .fillColor(MUTED)
-      .text(contactLine, contactX, footerY + 28, { width: CW * 0.58 });
+      .text(contactLine, contactX, textBaseY + 22, { width: CW * 0.52 });
     // Divider
     doc
       .moveTo(W * 0.62, footerY + 8)
