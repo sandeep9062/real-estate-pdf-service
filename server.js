@@ -7,7 +7,6 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "15mb" }));
 
-// Fetch image as buffer with timeout
 const fetchImage = async (url) => {
   try {
     if (!url || typeof url !== "string") return null;
@@ -17,8 +16,13 @@ const fetchImage = async (url) => {
       headers: { "User-Agent": "PropertyBulbul-PDF/1.0" },
     });
     const buf = Buffer.from(response.data);
-    // Basic check — JPEG starts with FF D8, PNG with 89 50
-    if (buf[0] === 0xff || buf[0] === 0x89 || buf[0] === 0x47) return buf;
+    if (
+      buf[0] === 0xff ||
+      buf[0] === 0x89 ||
+      buf[0] === 0x47 ||
+      buf[0] === 0x52
+    )
+      return buf;
     return null;
   } catch {
     return null;
@@ -39,7 +43,7 @@ app.get("/", (req, res) => {
     <div style="font-family:sans-serif;text-align:center;padding-top:50px">
       <h1 style="color:#4161df">Property Bulbul PDF Service</h1>
       <p>Status: <span style="color:#27ae60;font-weight:bold">ONLINE</span></p>
-      <p>Ready for <code>POST /generate-brochure</code></p>
+      <p>Ready for POST /generate-brochure</p>
     </div>
   `);
 });
@@ -69,16 +73,14 @@ app.post("/generate-brochure", async (req, res) => {
   console.log(`Generating PDF for: ${p.title}`);
 
   try {
-    // ── Design tokens ──────────────────────────────────────────
+    // Design tokens
     const PRIMARY = "#4161df";
     const DARK = "#111827";
     const MUTED = "#374151";
     const LIGHT = "#9ca3af";
     const BG = "#f3f4f6";
     const WHITE = "#ffffff";
-    const ACCENT = "#1e3a8a";
 
-    // ── Page setup ─────────────────────────────────────────────
     const doc = new PDFDocument({ size: "A4", margin: 0, compress: true });
     const chunks = [];
     doc.on("data", (c) => chunks.push(c));
@@ -92,37 +94,12 @@ app.post("/generate-brochure", async (req, res) => {
     const M = 36;
     const CW = W - M * 2;
 
-    // ── Helper: draw rounded rect ──────────────────────────────
-    const roundRect = (x, y, w, h, r, fillColor, strokeColor) => {
-      doc.save();
-      doc.roundedRect(x, y, w, h, r);
-      if (fillColor) doc.fill(fillColor);
-      if (strokeColor) doc.stroke(strokeColor);
-      doc.restore();
-    };
-
-    // ── Helper: section heading ────────────────────────────────
-    const sectionHeading = (label, y) => {
-      doc.rect(M, y, 3, 16).fill(PRIMARY);
-      doc
-        .fontSize(8.5)
-        .font("Helvetica-Bold")
-        .fillColor(PRIMARY)
-        .text(label, M + 10, y + 3);
-      return y + 24;
-    };
-
-    // =====================================================
-    // BACKGROUND
-    // =====================================================
+    // White background
     doc.rect(0, 0, W, H).fill(WHITE);
 
-    // =====================================================
-    // HEADER BAR
-    // =====================================================
-    doc.rect(0, 0, W, 58).fill(PRIMARY);
+    // ── HEADER ────────────────────────────────────────────────
+    doc.rect(0, 0, W, 56).fill(PRIMARY);
 
-    // Brand name
     doc
       .fontSize(20)
       .font("Helvetica-Bold")
@@ -131,248 +108,240 @@ app.post("/generate-brochure", async (req, res) => {
       .font("Helvetica")
       .text("Bulbul");
 
-    // Ref + verified badge
-    const refId = p._id.toString().substring(0, 8).toUpperCase();
-    roundRect(W - M - 120, 12, 120, 34, 4, "rgba(255,255,255,0.15)", null);
+    // Verified badge box
+    doc
+      .rect(W - M - 118, 13, 118, 30)
+      .fillOpacity(0.2)
+      .fill(WHITE);
+    doc.fillOpacity(1);
     doc
       .fontSize(7)
       .font("Helvetica-Bold")
-      .fillColor("rgba(255,255,255,0.8)")
-      .text("VERIFIED LISTING", W - M - 116, 17, {
-        width: 112,
+      .fillColor(WHITE)
+      .text("VERIFIED LISTING", W - M - 114, 19, {
+        width: 110,
         align: "center",
       });
-    doc
-      .fontSize(8)
-      .font("Helvetica-Bold")
-      .fillColor(WHITE)
-      .text(`REF: ${refId}`, W - M - 116, 28, { width: 112, align: "center" });
-
-    let Y = 68; // current Y position
-
-    // =====================================================
-    // IMAGE GALLERY
-    // =====================================================
-    const images = p.image.slice(0, 5); // max 5 images
-    const heroH = 195;
-    const thumbH = 72;
-    const gap = 6;
-
-    if (images.length > 0) {
-      // Fetch all images in parallel
-      const imgBuffers = await Promise.all(images.map(fetchImage));
-
-      // Hero image (always full width)
-      const heroW = images.length > 1 ? CW * 0.62 : CW;
-      const heroX = M;
-
-      if (imgBuffers[0]) {
-        doc.save();
-        doc.roundedRect(heroX, Y, heroW, heroH, 8).clip();
-        doc.image(imgBuffers[0], heroX, Y, {
-          width: heroW,
-          height: heroH,
-          cover: [heroW, heroH],
-        });
-        doc.restore();
-      } else {
-        roundRect(heroX, Y, heroW, heroH, 8, BG, null);
-        doc
-          .fontSize(9)
-          .font("Helvetica")
-          .fillColor(LIGHT)
-          .text("No Image", heroX, Y + heroH / 2 - 6, {
-            width: heroW,
-            align: "center",
-          });
-      }
-
-      // Side thumbnails (up to 4)
-      if (images.length > 1) {
-        const sideX = heroX + heroW + gap;
-        const sideW = CW - heroW - gap;
-        const maxThumbs = 4;
-        const thumbCount = Math.min(images.length - 1, maxThumbs);
-        const thumbW = sideW;
-        const totalGaps = (thumbCount - 1) * gap;
-        const eachThumbH = (heroH - totalGaps) / thumbCount;
-
-        for (let i = 0; i < thumbCount; i++) {
-          const tx = sideX;
-          const ty = Y + i * (eachThumbH + gap);
-          const buf = imgBuffers[i + 1];
-
-          if (buf) {
-            doc.save();
-            doc.roundedRect(tx, ty, thumbW, eachThumbH, 6).clip();
-            doc.image(buf, tx, ty, {
-              width: thumbW,
-              height: eachThumbH,
-              cover: [thumbW, eachThumbH],
-            });
-            doc.restore();
-          } else {
-            roundRect(tx, ty, thumbW, eachThumbH, 6, BG, null);
-          }
-
-          // Image count badge on last thumb
-          if (i === maxThumbs - 1 && images.length > maxThumbs + 1) {
-            roundRect(tx, ty, thumbW, eachThumbH, 6, "rgba(0,0,0,0.5)", null);
-            doc
-              .fontSize(11)
-              .font("Helvetica-Bold")
-              .fillColor(WHITE)
-              .text(
-                `+${images.length - maxThumbs - 1} more`,
-                tx,
-                ty + eachThumbH / 2 - 8,
-                {
-                  width: thumbW,
-                  align: "center",
-                },
-              );
-          }
-        }
-      }
-
-      Y += heroH + 14;
-    } else {
-      // No images placeholder
-      roundRect(M, Y, CW, 80, 8, BG, null);
-      doc
-        .fontSize(10)
-        .font("Helvetica")
-        .fillColor(LIGHT)
-        .text("No images available", M, Y + 32, { width: CW, align: "center" });
-      Y += 94;
-    }
-
-    // =====================================================
-    // TITLE + DEAL BADGE + PRICE
-    // =====================================================
-    // Deal badge
-    const dealColor = p.deal === "Rent" ? "#dc2626" : "#16a34a";
-    roundRect(M, Y, 52, 18, 9, dealColor, null);
+    const refId = p._id.toString().substring(0, 8).toUpperCase();
     doc
       .fontSize(7.5)
       .font("Helvetica-Bold")
       .fillColor(WHITE)
-      .text(p.deal === "Rent" ? "FOR RENT" : "FOR SALE", M + 2, Y + 5, {
-        width: 48,
+      .text(`REF: ${refId}`, W - M - 114, 29, { width: 110, align: "center" });
+
+    let Y = 66;
+
+    // ── IMAGES ────────────────────────────────────────────────
+    // Fetch all images in parallel (max 5)
+    const imageUrls = p.image.slice(0, 5);
+    const imgBuffers = await Promise.all(imageUrls.map(fetchImage));
+    const validImgs = imgBuffers.filter(Boolean);
+
+    if (validImgs.length === 0) {
+      // No image placeholder
+      doc.rect(M, Y, CW, 75).fill(BG);
+      doc
+        .fontSize(10)
+        .font("Helvetica")
+        .fillColor(LIGHT)
+        .text("No images available", M, Y + 28, { width: CW, align: "center" });
+      Y += 85;
+    } else if (validImgs.length === 1) {
+      // Single image — full width, good height
+      const imgH = 220;
+      doc.save();
+      doc.rect(M, Y, CW, imgH).clip();
+      // Use 'contain' approach: scale to fill width, center vertically
+      doc.image(validImgs[0], M, Y, {
+        width: CW,
+        height: imgH,
+        cover: [CW, imgH],
+      });
+      doc.restore();
+      // Subtle border
+      doc.rect(M, Y, CW, imgH).lineWidth(0.5).stroke("#e5e7eb");
+      Y += imgH + 10;
+    } else {
+      // Multiple images: large hero on left, thumbnails on right
+      const heroH = 220;
+      const heroW = Math.round(CW * 0.64);
+      const sideW = CW - heroW - 6;
+      const sideX = M + heroW + 6;
+
+      // Hero image
+      doc.save();
+      doc.rect(M, Y, heroW, heroH).clip();
+      doc.image(validImgs[0], M, Y, {
+        width: heroW,
+        height: heroH,
+        cover: [heroW, heroH],
+      });
+      doc.restore();
+      doc.rect(M, Y, heroW, heroH).lineWidth(0.5).stroke("#e5e7eb");
+
+      // Side thumbnails — evenly divide available height
+      const sideCount = Math.min(validImgs.length - 1, 4);
+      const gapCount = sideCount - 1;
+      const totalGap = gapCount * 5;
+      const thumbH = Math.floor((heroH - totalGap) / sideCount);
+
+      for (let i = 0; i < sideCount; i++) {
+        const ty = Y + i * (thumbH + 5);
+        doc.save();
+        doc.rect(sideX, ty, sideW, thumbH).clip();
+        doc.image(validImgs[i + 1], sideX, ty, {
+          width: sideW,
+          height: thumbH,
+          cover: [sideW, thumbH],
+        });
+        doc.restore();
+        doc.rect(sideX, ty, sideW, thumbH).lineWidth(0.5).stroke("#e5e7eb");
+
+        // More images overlay badge on last thumb
+        if (i === sideCount - 1 && p.image.length > 5) {
+          doc.rect(sideX, ty, sideW, thumbH).fillOpacity(0.6).fill("#000000");
+          doc.fillOpacity(1);
+          doc
+            .fontSize(10)
+            .font("Helvetica-Bold")
+            .fillColor(WHITE)
+            .text(`+${p.image.length - 5} more`, sideX, ty + thumbH / 2 - 7, {
+              width: sideW,
+              align: "center",
+            });
+        }
+      }
+      doc.fillOpacity(1);
+      Y += heroH + 12;
+    }
+
+    // ── DEAL BADGE ────────────────────────────────────────────
+    const dealColor = p.deal === "Rent" ? "#dc2626" : "#16a34a";
+    doc.roundedRect(M, Y, 58, 17, 8).fill(dealColor);
+    doc
+      .fontSize(7.5)
+      .font("Helvetica-Bold")
+      .fillColor(WHITE)
+      .text(p.deal === "Rent" ? "FOR RENT" : "FOR SALE", M, Y + 4, {
+        width: 58,
         align: "center",
       });
-
     Y += 22;
+
+    // ── TITLE + PRICE ─────────────────────────────────────────
+    const priceBoxW = 140;
+    const titleW = CW - priceBoxW - 12;
 
     // Title
     doc
       .fontSize(15)
       .font("Helvetica-Bold")
       .fillColor(DARK)
-      .text(truncate(p.title, 80), M, Y, { width: CW - 145, lineGap: 1 });
+      .text(truncate(p.title, 75), M, Y, { width: titleW, lineGap: 2 });
 
-    // Price box (right aligned)
-    roundRect(W - M - 138, Y - 4, 138, 42, 6, PRIMARY, null);
+    // Price box
+    doc.roundedRect(W - M - priceBoxW, Y - 2, priceBoxW, 42, 5).fill(PRIMARY);
     doc
       .fontSize(7)
       .font("Helvetica")
-      .fillColor("rgba(255,255,255,0.8)")
-      .text("ASKING PRICE", W - M - 134, Y + 2, {
-        width: 130,
+      .fillColor(WHITE)
+      .fillOpacity(0.8)
+      .text("ASKING PRICE", W - M - priceBoxW + 4, Y + 4, {
+        width: priceBoxW - 8,
         align: "center",
       });
+    doc.fillOpacity(1);
     doc
-      .fontSize(14)
+      .fontSize(13)
       .font("Helvetica-Bold")
       .fillColor(WHITE)
-      .text(formatPrice(p.price, p.deal), W - M - 134, Y + 14, {
-        width: 130,
+      .text(formatPrice(p.price, p.deal), W - M - priceBoxW + 4, Y + 16, {
+        width: priceBoxW - 8,
         align: "center",
       });
 
     Y += 46;
 
-    // Location line
+    // Location
+    const locText =
+      [p.location?.address, p.location?.city].filter(Boolean).join(", ") ||
+      "Tricity";
     doc
       .fontSize(8.5)
       .font("Helvetica")
-      .fillColor(MUTED)
-      .text(
-        [p.location?.address, p.location?.city].filter(Boolean).join(", ") ||
-          "Tricity",
-        M,
-        Y,
-        { width: CW },
-      );
+      .fillColor(LIGHT)
+      .text(locText, M, Y, { width: CW });
+    Y += 16;
 
-    Y += 18;
-
-    // =====================================================
-    // SPECS ROW
-    // =====================================================
+    // ── SPECS ROW ─────────────────────────────────────────────
     const specs = [
       { label: "BEDROOMS", value: `${p.facilities?.bedrooms || 0} BHK` },
-      { label: "BATHROOMS", value: `${p.facilities?.bathrooms || 0}` },
+      { label: "BATHROOMS", value: String(p.facilities?.bathrooms || 0) },
       {
         label: "AREA",
         value: `${p.area?.value || 0} ${p.area?.unit || "sqft"}`,
       },
-      { label: "FACING", value: p.facing },
-      { label: "STATUS", value: p.availability },
+      { label: "FACING", value: truncate(p.facing, 10) },
+      { label: "STATUS", value: truncate(p.availability, 12) },
     ];
 
-    const sW = (CW - (specs.length - 1) * 6) / specs.length;
+    const specGap = 6;
+    const specW = (CW - specGap * (specs.length - 1)) / specs.length;
     let sx = M;
+    const specH = 44;
 
     specs.forEach((s) => {
-      roundRect(sx, Y, sW, 46, 6, BG, null);
-      // Colored top bar
-      doc.rect(sx, Y, sW, 3).fill(PRIMARY);
+      doc.rect(sx, Y, specW, specH).fill(BG);
+      // Colored top accent
+      doc.rect(sx, Y, specW, 3).fill(PRIMARY);
       doc
         .fontSize(6.5)
         .font("Helvetica-Bold")
         .fillColor(LIGHT)
-        .text(s.label, sx + 3, Y + 9, { width: sW - 6, align: "center" });
+        .text(s.label, sx + 2, Y + 9, { width: specW - 4, align: "center" });
       doc
         .fontSize(10)
         .font("Helvetica-Bold")
         .fillColor(DARK)
-        .text(truncate(s.value, 12), sx + 3, Y + 22, {
-          width: sW - 6,
-          align: "center",
-        });
-      sx += sW + 6;
+        .text(s.value, sx + 2, Y + 22, { width: specW - 4, align: "center" });
+      sx += specW + specGap;
     });
 
-    Y += 56;
+    Y += specH + 12;
 
-    // =====================================================
-    // TWO COLUMN LAYOUT — Description | Details
-    // =====================================================
-    const leftW = CW * 0.58;
-    const rightW = CW - leftW - 14;
-    const rightX = M + leftW + 14;
-    const colStartY = Y;
-
-    // ── LEFT: Description ──────────────────────────────
-    Y = sectionHeading("PROPERTY OVERVIEW", colStartY);
-
+    // ── DESCRIPTION (FULL WIDTH) ──────────────────────────────
+    // Section label
+    doc.rect(M, Y, 3, 15).fill(PRIMARY);
     doc
       .fontSize(8.5)
+      .font("Helvetica-Bold")
+      .fillColor(PRIMARY)
+      .text("PROPERTY OVERVIEW", M + 9, Y + 2);
+    Y += 22;
+
+    // Description text — full width, no column overlap
+    doc
+      .fontSize(9)
       .font("Helvetica")
       .fillColor(MUTED)
       .text(p.description, M, Y, {
-        width: leftW,
+        width: CW,
         align: "justify",
         lineGap: 2.5,
-        height: 115,
+        height: 72,
         ellipsis: true,
       });
 
-    Y += 124;
+    Y += 82;
 
-    // ── RIGHT: Property Details ────────────────────────
-    let rightY = sectionHeading("PROPERTY DETAILS", colStartY);
+    // ── PROPERTY DETAILS (TWO COLUMN GRID) ───────────────────
+    doc.rect(M, Y, 3, 15).fill(PRIMARY);
+    doc
+      .fontSize(8.5)
+      .font("Helvetica-Bold")
+      .fillColor(PRIMARY)
+      .text("PROPERTY DETAILS", M + 9, Y + 2);
+    Y += 20;
 
     const details = [
       { label: "Deal Type", value: p.deal },
@@ -383,68 +352,73 @@ app.post("/generate-brochure", async (req, res) => {
       { label: "Status", value: p.availability },
     ];
 
-    details.forEach((d) => {
-      // Row background alternating
-      roundRect(rightX, rightY, rightW, 22, 3, BG, null);
+    // 3 columns, 2 rows
+    const dColCount = 3;
+    const dColW = (CW - (dColCount - 1) * 8) / dColCount;
+    const dRowH = 32;
+
+    details.forEach((d, i) => {
+      const col = i % dColCount;
+      const row = Math.floor(i / dColCount);
+      const dx = M + col * (dColW + 8);
+      const dy = Y + row * dRowH;
+
+      doc.rect(dx, dy, dColW, dRowH - 3).fill(BG);
       doc
         .fontSize(7)
         .font("Helvetica")
         .fillColor(LIGHT)
-        .text(d.label, rightX + 6, rightY + 3, { width: rightW - 10 });
+        .text(d.label, dx + 6, dy + 4, { width: dColW - 10 });
+      doc
+        .fontSize(9)
+        .font("Helvetica-Bold")
+        .fillColor(DARK)
+        .text(truncate(d.value || "N/A", 22), dx + 6, dy + 14, {
+          width: dColW - 10,
+        });
+    });
+
+    Y += Math.ceil(details.length / dColCount) * dRowH + 10;
+
+    // ── HIGHLIGHTS ────────────────────────────────────────────
+    const highlights = [
+      p.facilities?.bedrooms ? `${p.facilities.bedrooms} Bedrooms` : null,
+      p.facilities?.bathrooms ? `${p.facilities.bathrooms} Bathrooms` : null,
+      p.furnishing && p.furnishing !== "N/A" ? p.furnishing : null,
+      p.facing && p.facing !== "N/A" ? `${p.facing} Facing` : null,
+      p.availability ? p.availability : null,
+    ].filter(Boolean);
+
+    if (highlights.length > 0 && Y < H - 100) {
+      doc.rect(M, Y, 3, 15).fill(PRIMARY);
       doc
         .fontSize(8.5)
         .font("Helvetica-Bold")
-        .fillColor(DARK)
-        .text(truncate(d.value || "N/A", 20), rightX + 6, rightY + 12, {
-          width: rightW - 10,
-        });
-      rightY += 26;
-    });
+        .fillColor(PRIMARY)
+        .text("HIGHLIGHTS", M + 9, Y + 2);
+      Y += 22;
 
-    // Advance Y to after both columns
-    Y = Math.max(Y, rightY) + 10;
-
-    // =====================================================
-    // AMENITIES / HIGHLIGHTS STRIP
-    // =====================================================
-    const highlights = [];
-    if (p.facilities?.bedrooms)
-      highlights.push(`${p.facilities.bedrooms} Bedrooms`);
-    if (p.facilities?.bathrooms)
-      highlights.push(`${p.facilities.bathrooms} Bathrooms`);
-    if (p.facilities?.parkings)
-      highlights.push(`${p.facilities.parkings} Parking`);
-    if (p.furnishing && p.furnishing !== "N/A") highlights.push(p.furnishing);
-    if (p.facing && p.facing !== "N/A") highlights.push(`${p.facing} Facing`);
-    if (p.availability) highlights.push(p.availability);
-
-    if (highlights.length > 0 && Y < H - 110) {
-      Y = sectionHeading("HIGHLIGHTS", Y);
       let hx = M;
       highlights.slice(0, 6).forEach((h) => {
-        const tw = doc.widthOfString(h, { fontSize: 8 }) + 18;
-        roundRect(hx, Y, tw, 20, 10, "#e0e7ff", null);
+        const tw = doc.widthOfString(h) + 22;
+        doc.roundedRect(hx, Y, tw, 19, 9).fill("#e0e7ff");
         doc
           .fontSize(8)
           .font("Helvetica-Bold")
           .fillColor(PRIMARY)
-          .text(h, hx + 6, Y + 6, { width: tw - 10 });
-        hx += tw + 6;
-        if (hx > W - M - 60) {
+          .text(h, hx + 7, Y + 5, { width: tw - 12 });
+        hx += tw + 7;
+        if (hx > W - M - 80) {
           hx = M;
-          Y += 26;
+          Y += 25;
         }
       });
-      Y += 28;
+      Y += 26;
     }
 
-    // =====================================================
-    // FOOTER
-    // =====================================================
-    const footerY = H - 58;
-
-    // Footer background strip
-    doc.rect(0, footerY, W, 58).fill("#f8fafc");
+    // ── FOOTER ────────────────────────────────────────────────
+    const footerY = H - 54;
+    doc.rect(0, footerY, W, 54).fill("#f8fafc");
     doc
       .moveTo(0, footerY)
       .lineTo(W, footerY)
@@ -452,89 +426,84 @@ app.post("/generate-brochure", async (req, res) => {
       .strokeColor("#e5e7eb")
       .stroke();
 
-    // Left — contact info
+    // Left — contact
     doc
       .fontSize(7.5)
       .font("Helvetica-Bold")
       .fillColor(DARK)
-      .text("INQUIRY CONTACT", M, footerY + 10);
-
+      .text("INQUIRY CONTACT", M, footerY + 9);
     const phone = p.user?.phone || "";
     const email = p.user?.email || "contact@propertybulbul.com";
     const contactLine = phone
       ? `Ph: ${phone}    Email: ${email}`
       : `Email: ${email}`;
-
     doc
       .fontSize(8)
       .font("Helvetica")
       .fillColor(MUTED)
-      .text(contactLine, M, footerY + 21, { width: CW * 0.6 });
+      .text(contactLine, M, footerY + 20, { width: CW * 0.58 });
 
-    // Center divider
+    // Divider
     doc
-      .moveTo(W / 2, footerY + 8)
-      .lineTo(W / 2, footerY + 48)
+      .moveTo(W * 0.62, footerY + 8)
+      .lineTo(W * 0.62, footerY + 46)
       .lineWidth(0.5)
       .strokeColor("#e5e7eb")
       .stroke();
 
     // Right — brand
+    const brandX = W * 0.64;
+    const brandW = W - brandX - M;
     doc
-      .fontSize(7.5)
+      .fontSize(7)
       .font("Helvetica")
       .fillColor(LIGHT)
-      .text("Official Property Brochure", W / 2 + 10, footerY + 10, {
-        width: W / 2 - M - 10,
+      .text("Official Property Brochure", brandX, footerY + 9, {
+        width: brandW,
         align: "right",
       });
     doc
       .fontSize(11)
       .font("Helvetica-Bold")
       .fillColor(PRIMARY)
-      .text("propertybulbul.com", W / 2 + 10, footerY + 22, {
-        width: W / 2 - M - 10,
+      .text("propertybulbul.com", brandX, footerY + 20, {
+        width: brandW,
         align: "right",
       });
     doc
       .fontSize(7)
       .font("Helvetica")
       .fillColor(LIGHT)
-      .text("Tricity's AI-Powered Property Search", W / 2 + 10, footerY + 37, {
-        width: W / 2 - M - 10,
+      .text("Tricity's AI-Powered Property Search", brandX, footerY + 35, {
+        width: brandW,
         align: "right",
       });
 
-    // =====================================================
-    // WATERMARK
-    // =====================================================
+    // ── WATERMARK ─────────────────────────────────────────────
     doc
       .save()
-      .translate(W / 2, H / 2 - 40)
+      .translate(W / 2, H / 2)
       .rotate(-42)
-      .fontSize(62)
+      .fontSize(58)
       .font("Helvetica-Bold")
       .fillColor(PRIMARY)
       .fillOpacity(0.025)
-      .text("PROPERTY BULBUL", -175, -30)
+      .text("PROPERTY BULBUL", -170, -25)
       .restore();
-
     doc.fillOpacity(1);
 
-    // Finalize
     doc.end();
     await pdfDone;
 
     const pdfBuffer = Buffer.concat(chunks);
-
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="brochure.pdf"`);
     res.setHeader("Content-Length", pdfBuffer.length);
     res.send(pdfBuffer);
 
-    console.log(`PDF generated successfully: ${p.title}`);
+    console.log(`PDF generated: ${p.title}`);
   } catch (error) {
-    console.error("PDF Generation Error:", error.message);
+    console.error("PDF Error:", error.message);
     res
       .status(500)
       .json({ error: "Failed to generate PDF", details: error.message });
