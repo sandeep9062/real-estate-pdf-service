@@ -98,20 +98,26 @@ app.post("/generate-brochure", async (req, res) => {
     const CW = W - M * 2;
     // White background
     doc.rect(0, 0, W, H).fill(WHITE);
-    // ── HEADER ────────────────────────────────────────────────
-    doc.rect(0, 0, W, 56).fill(PRIMARY);
-    const iconSize = 36;
-    const iconY = (56 - iconSize) / 2; // centered vertically in header
+    // --- UPDATED HEADER ALIGNMENT ---
+    const headerH = 56;
+    doc.rect(0, 0, W, headerH).fill(PRIMARY);
+
+    const iconSize = 32; // Standardized size
+    const contentCenterY = headerH / 2;
+    const iconY = contentCenterY - iconSize / 2;
+    const textY = contentCenterY - 7; // Precise offset for 20pt font height
+
     let textX = M;
     if (iconBuffer) {
       doc.image(iconBuffer, M, iconY, { width: iconSize, height: iconSize });
-      textX = M + iconSize + 8;
+      textX = M + iconSize + 12; // 12px gap for breathing room
     }
+
     doc
       .fontSize(20)
       .font("Helvetica-Bold")
       .fillColor(WHITE)
-      .text("Property", textX, 16, { continued: true })
+      .text("Property", textX, textY, { continued: true })
       .font("Helvetica")
       .text("Bulbul");
     // Verified badge box
