@@ -261,22 +261,39 @@ app.post("/generate-brochure", async (req, res) => {
       .fillColor(LIGHT)
       .text(locText, M, Y, { width: CW });
     Y += 16;
-    // ── SPECS ROW ─────────────────────────────────────────────
-    const specs = [
-      { label: "BEDROOMS", value: `${p.facilities?.bedrooms || 0} BHK` },
-      { label: "BATHROOMS", value: String(p.facilities?.bathrooms || 0) },
+    // --- UPDATED DYNAMIC SPECS LOGIC ---
+    const allSpecs = [
+      {
+        label: "BEDROOMS",
+        value:
+          p.facilities?.bedrooms > 0 ? `${p.facilities.bedrooms} BHK` : null,
+      },
+      {
+        label: "BATHROOMS",
+        value:
+          p.facilities?.bathrooms > 0 ? String(p.facilities.bathrooms) : null,
+      },
       {
         label: "AREA",
-        value: `${p.area?.value || 0} ${p.area?.unit || "sqft"}`,
+        value:
+          p.area?.value > 0 ? `${p.area.value} ${p.area.unit || "sqft"}` : null,
       },
-      { label: "FACING", value: truncate(p.facing, 10) },
-      { label: "STATUS", value: truncate(p.availability, 12) },
-    ];
+      {
+        label: "FACING",
+        value: p.facing && p.facing !== "N/A" ? p.facing : null,
+      },
+      {
+        label: "STATUS",
+        value:
+          p.availability && p.availability !== "N/A" ? p.availability : null,
+      },
+    ].filter((s) => s.value !== null); // ONLY RENDER VALID DATA
+
     const specGap = 6;
-    const specW = (CW - specGap * (specs.length - 1)) / specs.length;
+    const specW = (CW - specGap * (allSpecs.length - 1)) / allSpecs.length;
     let sx = M;
     const specH = 44;
-    specs.forEach((s) => {
+    allSpecs.forEach((s) => {
       doc.rect(sx, Y, specW, specH).fill(BG);
       // Colored top accent
       doc.rect(sx, Y, specW, 3).fill(PRIMARY);
@@ -326,11 +343,21 @@ app.post("/generate-brochure", async (req, res) => {
     const details = [
       { label: "Deal Type", value: p.deal },
       { label: "Category", value: p.propertyCategory },
-      { label: "Furnishing", value: p.furnishing },
-      { label: "Facing", value: p.facing },
+      {
+        label: "Furnishing",
+        value: p.furnishing && p.furnishing !== "N/A" ? p.furnishing : null,
+      },
+      {
+        label: "Facing",
+        value: p.facing && p.facing !== "N/A" ? p.facing : null,
+      },
       { label: "City", value: p.location?.city || "Tricity" },
-      { label: "Status", value: p.availability },
-    ];
+      {
+        label: "Status",
+        value:
+          p.availability && p.availability !== "N/A" ? p.availability : null,
+      },
+    ].filter((d) => d.value !== null);
     // 3 columns, 2 rows
     const dColCount = 3;
     const dColW = (CW - (dColCount - 1) * 8) / dColCount;
