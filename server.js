@@ -393,7 +393,7 @@ app.post("/generate-brochure", async (req, res) => {
       .stroke();
     // Left — contact
     const userImgBuf = await fetchImage(p.user?.image);
-    const profileSize = 32;
+    const profileSize = 28;
     let contactX = M;
     if (userImgBuf) {
       const profileY = footerY + (54 - profileSize) / 2;
@@ -413,10 +413,18 @@ app.post("/generate-brochure", async (req, res) => {
       contactX = M + profileSize + 10;
     }
     doc
-      .fontSize(7.5)
+      .fontSize(7)
       .font("Helvetica-Bold")
       .fillColor(DARK)
-      .text("INQUIRY CONTACT", contactX, footerY + 9);
+      .text("INQUIRY CONTACT", contactX, footerY + 5);
+    const userName = p.user?.name;
+    if (userName) {
+      doc
+        .fontSize(9.5)
+        .font("Helvetica-Bold")
+        .fillColor(DARK)
+        .text(userName, contactX, footerY + 15);
+    }
     const phone = p.user?.phone || "";
     const email = p.user?.email || "contact@propertybulbul.com";
     const contactLine = phone
@@ -426,7 +434,7 @@ app.post("/generate-brochure", async (req, res) => {
       .fontSize(8)
       .font("Helvetica")
       .fillColor(MUTED)
-      .text(contactLine, contactX, footerY + 20, { width: CW * 0.58 });
+      .text(contactLine, contactX, footerY + 28, { width: CW * 0.58 });
     // Divider
     doc
       .moveTo(W * 0.62, footerY + 8)
