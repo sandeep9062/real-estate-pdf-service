@@ -7,28 +7,37 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "15mb" }));
 
+// Fetch image as buffer with timeout
 const fetchImage = async (url) => {
   try {
-    const response = await axios.get(url, {
+    if (!url || typeof url !== "string") return null;
+    const response = await axios.get(url.trim(), {
       responseType: "arraybuffer",
       timeout: 8000,
+      headers: { "User-Agent": "PropertyBulbul-PDF/1.0" },
     });
-    return Buffer.from(response.data);
+    const buf = Buffer.from(response.data);
+    // Basic check — JPEG starts with FF D8, PNG with 89 50
+    if (buf[0] === 0xff || buf[0] === 0x89 || buf[0] === 0x47) return buf;
+    return null;
   } catch {
     return null;
   }
 };
 
 const formatPrice = (price, deal) => {
-  if (!price) return "Price on Request";
+  if (!price && price !== 0) return "Price on Request";
   const formatted = Number(price).toLocaleString("en-IN");
-  return deal === "Rent" ? `₹${formatted}/mo` : `₹${formatted}`;
+  return deal === "Rent" ? `Rs ${formatted}/mo` : `Rs ${formatted}`;
 };
+
+const truncate = (str, len) =>
+  str && str.length > len ? str.substring(0, len) + "..." : str || "";
 
 app.get("/", (req, res) => {
   res.status(200).send(`
     <div style="font-family:sans-serif;text-align:center;padding-top:50px">
-      <h1 style="color:#2c3e50">🚀 Property Bulbul PDF Service</h1>
+      <h1 style="color:#4161df">Property Bulbul PDF Service</h1>
       <p>Status: <span style="color:#27ae60;font-weight:bold">ONLINE</span></p>
       <p>Ready for <code>POST /generate-brochure</code></p>
     </div>
@@ -37,10 +46,8 @@ app.get("/", (req, res) => {
 
 app.post("/generate-brochure", async (req, res) => {
   const { property } = req.body;
-
-  if (!property) {
+  if (!property)
     return res.status(400).json({ error: "Property data is required" });
-  }
 
   const p = {
     _id: property._id || "PROPERTY001",
@@ -54,232 +61,318 @@ app.post("/generate-brochure", async (req, res) => {
     availability: property.availability || "Available",
     furnishing: property.furnishing || "N/A",
     propertyCategory: property.propertyCategory || "Residential",
-    image: Array.isArray(property.image) ? property.image : [],
+    image: Array.isArray(property.image) ? property.image.filter(Boolean) : [],
     user: property.user || {},
     location: property.location || {},
   };
 
-  console.log(`⏳ Generating PDF for: ${p.title}...`);
+  console.log(`Generating PDF for: ${p.title}`);
 
   try {
-    // Colors
+    // ── Design tokens ──────────────────────────────────────────
     const PRIMARY = "#4161df";
-    const DARK = "#1f2937";
-    const LIGHT = "#6b7280";
-    const BG = "#f8fafc";
-    const BORDER = "#e2e8f0";
+    const DARK = "#111827";
+    const MUTED = "#374151";
+    const LIGHT = "#9ca3af";
+    const BG = "#f3f4f6";
+    const WHITE = "#ffffff";
+    const ACCENT = "#1e3a8a";
 
-    const doc = new PDFDocument({ size: "A4", margin: 0 });
+    // ── Page setup ─────────────────────────────────────────────
+    const doc = new PDFDocument({ size: "A4", margin: 0, compress: true });
     const chunks = [];
     doc.on("data", (c) => chunks.push(c));
-    const pdfDone = new Promise((res, rej) => {
-      doc.on("end", res);
-      doc.on("error", rej);
+    const pdfDone = new Promise((resolve, reject) => {
+      doc.on("end", resolve);
+      doc.on("error", reject);
     });
 
-    const W = 595.28; // A4 width
-    const H = 841.89; // A4 height
-    const M = 40; // margin
-    const CW = W - M * 2; // content width
+    const W = 595.28;
+    const H = 841.89;
+    const M = 36;
+    const CW = W - M * 2;
 
-    // ── WATERMARK ──────────────────────────────────────────────
-    doc
-      .save()
-      .translate(W / 2, H / 2)
-      .rotate(-45)
-      .fontSize(55)
-      .font("Helvetica-Bold")
-      .fillColor(PRIMARY)
-      .fillOpacity(0.03)
-      .text("PROPERTY BULBUL", -160, -30)
-      .restore();
-    doc.fillOpacity(1);
+    // ── Helper: draw rounded rect ──────────────────────────────
+    const roundRect = (x, y, w, h, r, fillColor, strokeColor) => {
+      doc.save();
+      doc.roundedRect(x, y, w, h, r);
+      if (fillColor) doc.fill(fillColor);
+      if (strokeColor) doc.stroke(strokeColor);
+      doc.restore();
+    };
 
-    // ── HEADER ─────────────────────────────────────────────────
-    doc.rect(0, 0, W, 65).fill("#ffffff");
+    // ── Helper: section heading ────────────────────────────────
+    const sectionHeading = (label, y) => {
+      doc.rect(M, y, 3, 16).fill(PRIMARY);
+      doc
+        .fontSize(8.5)
+        .font("Helvetica-Bold")
+        .fillColor(PRIMARY)
+        .text(label, M + 10, y + 3);
+      return y + 24;
+    };
+
+    // =====================================================
+    // BACKGROUND
+    // =====================================================
+    doc.rect(0, 0, W, H).fill(WHITE);
+
+    // =====================================================
+    // HEADER BAR
+    // =====================================================
+    doc.rect(0, 0, W, 58).fill(PRIMARY);
+
+    // Brand name
     doc
-      .fontSize(22)
+      .fontSize(20)
       .font("Helvetica-Bold")
-      .fillColor(PRIMARY)
-      .text("Property", M, 18, { continued: true })
-      .fillColor(DARK)
+      .fillColor(WHITE)
+      .text("Property", M, 16, { continued: true })
+      .font("Helvetica")
       .text("Bulbul");
 
+    // Ref + verified badge
     const refId = p._id.toString().substring(0, 8).toUpperCase();
-    doc
-      .fontSize(7.5)
-      .font("Helvetica")
-      .fillColor(LIGHT)
-      .text("VERIFIED PROPERTY", W - M - 130, 20, {
-        width: 130,
-        align: "right",
-      })
-      .text(`REF: ${refId}`, W - M - 130, 30, { width: 130, align: "right" });
-
-    doc
-      .moveTo(M, 63)
-      .lineTo(W - M, 63)
-      .lineWidth(1.5)
-      .strokeColor(PRIMARY)
-      .stroke();
-
-    // ── HERO IMAGE ─────────────────────────────────────────────
-    let currentY = 75;
-    const heroH = 210;
-
-    if (p.image.length > 0) {
-      const imgBuf = await fetchImage(p.image[0]);
-      if (imgBuf) {
-        doc.save();
-        doc.roundedRect(M, currentY, CW, heroH, 8).clip();
-        doc.image(imgBuf, M, currentY, {
-          width: CW,
-          height: heroH,
-          cover: [CW, heroH],
-        });
-        doc.restore();
-        currentY += heroH + 8;
-
-        // Thumbnails (up to 3)
-        if (p.image.length > 1) {
-          const tW = (CW - 12) / 3;
-          const tH = 65;
-          let tx = M;
-          for (let i = 1; i <= 3; i++) {
-            if (!p.image[i]) {
-              // empty thumb placeholder
-              doc.roundedRect(tx, currentY, tW, tH, 5).fill(BG);
-            } else {
-              const tb = await fetchImage(p.image[i]);
-              if (tb) {
-                doc.save();
-                doc.roundedRect(tx, currentY, tW, tH, 5).clip();
-                doc.image(tb, tx, currentY, {
-                  width: tW,
-                  height: tH,
-                  cover: [tW, tH],
-                });
-                doc.restore();
-              } else {
-                doc.roundedRect(tx, currentY, tW, tH, 5).fill(BG);
-              }
-            }
-            tx += tW + 6;
-          }
-          currentY += tH + 10;
-        }
-      } else {
-        // No image — placeholder
-        doc.roundedRect(M, currentY, CW, 60, 8).fill(BG);
-        doc
-          .fontSize(10)
-          .font("Helvetica")
-          .fillColor(LIGHT)
-          .text("No image available", M, currentY + 22, {
-            width: CW,
-            align: "center",
-          });
-        currentY += 70;
-      }
-    }
-
-    // ── TITLE + PRICE ──────────────────────────────────────────
-    const priceBoxW = 140;
-    const titleW = CW - priceBoxW - 10;
-
-    doc
-      .fontSize(16)
-      .font("Helvetica-Bold")
-      .fillColor(DARK)
-      .text(p.title, M, currentY, { width: titleW, lineGap: 2 });
-
-    // Price badge
-    doc.roundedRect(W - M - priceBoxW, currentY - 4, priceBoxW, 42, 6).fill(BG);
+    roundRect(W - M - 120, 12, 120, 34, 4, "rgba(255,255,255,0.15)", null);
     doc
       .fontSize(7)
-      .font("Helvetica")
-      .fillColor(LIGHT)
-      .text("PRICE", W - M - priceBoxW + 4, currentY + 2, {
-        width: priceBoxW - 8,
+      .font("Helvetica-Bold")
+      .fillColor("rgba(255,255,255,0.8)")
+      .text("VERIFIED LISTING", W - M - 116, 17, {
+        width: 112,
         align: "center",
       });
     doc
-      .fontSize(13)
+      .fontSize(8)
       .font("Helvetica-Bold")
-      .fillColor(PRIMARY)
+      .fillColor(WHITE)
+      .text(`REF: ${refId}`, W - M - 116, 28, { width: 112, align: "center" });
+
+    let Y = 68; // current Y position
+
+    // =====================================================
+    // IMAGE GALLERY
+    // =====================================================
+    const images = p.image.slice(0, 5); // max 5 images
+    const heroH = 195;
+    const thumbH = 72;
+    const gap = 6;
+
+    if (images.length > 0) {
+      // Fetch all images in parallel
+      const imgBuffers = await Promise.all(images.map(fetchImage));
+
+      // Hero image (always full width)
+      const heroW = images.length > 1 ? CW * 0.62 : CW;
+      const heroX = M;
+
+      if (imgBuffers[0]) {
+        doc.save();
+        doc.roundedRect(heroX, Y, heroW, heroH, 8).clip();
+        doc.image(imgBuffers[0], heroX, Y, {
+          width: heroW,
+          height: heroH,
+          cover: [heroW, heroH],
+        });
+        doc.restore();
+      } else {
+        roundRect(heroX, Y, heroW, heroH, 8, BG, null);
+        doc
+          .fontSize(9)
+          .font("Helvetica")
+          .fillColor(LIGHT)
+          .text("No Image", heroX, Y + heroH / 2 - 6, {
+            width: heroW,
+            align: "center",
+          });
+      }
+
+      // Side thumbnails (up to 4)
+      if (images.length > 1) {
+        const sideX = heroX + heroW + gap;
+        const sideW = CW - heroW - gap;
+        const maxThumbs = 4;
+        const thumbCount = Math.min(images.length - 1, maxThumbs);
+        const thumbW = sideW;
+        const totalGaps = (thumbCount - 1) * gap;
+        const eachThumbH = (heroH - totalGaps) / thumbCount;
+
+        for (let i = 0; i < thumbCount; i++) {
+          const tx = sideX;
+          const ty = Y + i * (eachThumbH + gap);
+          const buf = imgBuffers[i + 1];
+
+          if (buf) {
+            doc.save();
+            doc.roundedRect(tx, ty, thumbW, eachThumbH, 6).clip();
+            doc.image(buf, tx, ty, {
+              width: thumbW,
+              height: eachThumbH,
+              cover: [thumbW, eachThumbH],
+            });
+            doc.restore();
+          } else {
+            roundRect(tx, ty, thumbW, eachThumbH, 6, BG, null);
+          }
+
+          // Image count badge on last thumb
+          if (i === maxThumbs - 1 && images.length > maxThumbs + 1) {
+            roundRect(tx, ty, thumbW, eachThumbH, 6, "rgba(0,0,0,0.5)", null);
+            doc
+              .fontSize(11)
+              .font("Helvetica-Bold")
+              .fillColor(WHITE)
+              .text(
+                `+${images.length - maxThumbs - 1} more`,
+                tx,
+                ty + eachThumbH / 2 - 8,
+                {
+                  width: thumbW,
+                  align: "center",
+                },
+              );
+          }
+        }
+      }
+
+      Y += heroH + 14;
+    } else {
+      // No images placeholder
+      roundRect(M, Y, CW, 80, 8, BG, null);
+      doc
+        .fontSize(10)
+        .font("Helvetica")
+        .fillColor(LIGHT)
+        .text("No images available", M, Y + 32, { width: CW, align: "center" });
+      Y += 94;
+    }
+
+    // =====================================================
+    // TITLE + DEAL BADGE + PRICE
+    // =====================================================
+    // Deal badge
+    const dealColor = p.deal === "Rent" ? "#dc2626" : "#16a34a";
+    roundRect(M, Y, 52, 18, 9, dealColor, null);
+    doc
+      .fontSize(7.5)
+      .font("Helvetica-Bold")
+      .fillColor(WHITE)
+      .text(p.deal === "Rent" ? "FOR RENT" : "FOR SALE", M + 2, Y + 5, {
+        width: 48,
+        align: "center",
+      });
+
+    Y += 22;
+
+    // Title
+    doc
+      .fontSize(15)
+      .font("Helvetica-Bold")
+      .fillColor(DARK)
+      .text(truncate(p.title, 80), M, Y, { width: CW - 145, lineGap: 1 });
+
+    // Price box (right aligned)
+    roundRect(W - M - 138, Y - 4, 138, 42, 6, PRIMARY, null);
+    doc
+      .fontSize(7)
+      .font("Helvetica")
+      .fillColor("rgba(255,255,255,0.8)")
+      .text("ASKING PRICE", W - M - 134, Y + 2, {
+        width: 130,
+        align: "center",
+      });
+    doc
+      .fontSize(14)
+      .font("Helvetica-Bold")
+      .fillColor(WHITE)
+      .text(formatPrice(p.price, p.deal), W - M - 134, Y + 14, {
+        width: 130,
+        align: "center",
+      });
+
+    Y += 46;
+
+    // Location line
+    doc
+      .fontSize(8.5)
+      .font("Helvetica")
+      .fillColor(MUTED)
       .text(
-        formatPrice(p.price, p.deal),
-        W - M - priceBoxW + 4,
-        currentY + 14,
-        { width: priceBoxW - 8, align: "center" },
+        [p.location?.address, p.location?.city].filter(Boolean).join(", ") ||
+          "Tricity",
+        M,
+        Y,
+        { width: CW },
       );
 
-    currentY += 50;
+    Y += 18;
 
-    // ── SPECS ──────────────────────────────────────────────────
+    // =====================================================
+    // SPECS ROW
+    // =====================================================
     const specs = [
-      { label: "BEDROOMS", value: `${p.facilities.bedrooms || 0} BHK` },
-      { label: "BATHROOMS", value: `${p.facilities.bathrooms || 0}` },
-      { label: "AREA", value: `${p.area.value} ${p.area.unit}` },
+      { label: "BEDROOMS", value: `${p.facilities?.bedrooms || 0} BHK` },
+      { label: "BATHROOMS", value: `${p.facilities?.bathrooms || 0}` },
+      {
+        label: "AREA",
+        value: `${p.area?.value || 0} ${p.area?.unit || "sqft"}`,
+      },
+      { label: "FACING", value: p.facing },
       { label: "STATUS", value: p.availability },
     ];
 
-    const sW = (CW - 15) / 4;
+    const sW = (CW - (specs.length - 1) * 6) / specs.length;
     let sx = M;
+
     specs.forEach((s) => {
-      doc.roundedRect(sx, currentY, sW, 44, 5).fill(BG);
+      roundRect(sx, Y, sW, 46, 6, BG, null);
+      // Colored top bar
+      doc.rect(sx, Y, sW, 3).fill(PRIMARY);
       doc
         .fontSize(6.5)
         .font("Helvetica-Bold")
         .fillColor(LIGHT)
-        .text(s.label, sx + 4, currentY + 7, {
-          width: sW - 8,
-          align: "center",
-        });
+        .text(s.label, sx + 3, Y + 9, { width: sW - 6, align: "center" });
       doc
         .fontSize(10)
         .font("Helvetica-Bold")
         .fillColor(DARK)
-        .text(s.value, sx + 4, currentY + 20, {
-          width: sW - 8,
+        .text(truncate(s.value, 12), sx + 3, Y + 22, {
+          width: sW - 6,
           align: "center",
         });
-      sx += sW + 5;
+      sx += sW + 6;
     });
 
-    currentY += 54;
+    Y += 56;
 
-    // ── DESCRIPTION ────────────────────────────────────────────
-    doc.rect(M, currentY, 3, 14).fill(PRIMARY);
-    doc
-      .fontSize(9)
-      .font("Helvetica-Bold")
-      .fillColor(PRIMARY)
-      .text("PROPERTY OVERVIEW", M + 9, currentY + 2);
-    currentY += 20;
+    // =====================================================
+    // TWO COLUMN LAYOUT — Description | Details
+    // =====================================================
+    const leftW = CW * 0.58;
+    const rightW = CW - leftW - 14;
+    const rightX = M + leftW + 14;
+    const colStartY = Y;
+
+    // ── LEFT: Description ──────────────────────────────
+    Y = sectionHeading("PROPERTY OVERVIEW", colStartY);
 
     doc
-      .fontSize(9.5)
+      .fontSize(8.5)
       .font("Helvetica")
-      .fillColor("#4b5563")
-      .text(p.description, M, currentY, {
-        width: CW,
+      .fillColor(MUTED)
+      .text(p.description, M, Y, {
+        width: leftW,
         align: "justify",
-        lineGap: 2,
-        height: 90,
+        lineGap: 2.5,
+        height: 115,
         ellipsis: true,
       });
 
-    currentY += 100;
+    Y += 124;
 
-    // ── DETAILS GRID ───────────────────────────────────────────
-    doc.rect(M, currentY, 3, 14).fill(PRIMARY);
-    doc
-      .fontSize(9)
-      .font("Helvetica-Bold")
-      .fillColor(PRIMARY)
-      .text("PROPERTY DETAILS", M + 9, currentY + 2);
-    currentY += 20;
+    // ── RIGHT: Property Details ────────────────────────
+    let rightY = sectionHeading("PROPERTY DETAILS", colStartY);
 
     const details = [
       { label: "Deal Type", value: p.deal },
@@ -287,78 +380,148 @@ app.post("/generate-brochure", async (req, res) => {
       { label: "Furnishing", value: p.furnishing },
       { label: "Facing", value: p.facing },
       { label: "City", value: p.location?.city || "Tricity" },
-      { label: "Address", value: p.location?.address || "N/A" },
+      { label: "Status", value: p.availability },
     ];
 
-    const dColW = CW / 3;
-    details.forEach((d, i) => {
-      const dx = M + (i % 3) * dColW;
-      const dy = currentY + Math.floor(i / 3) * 32;
+    details.forEach((d) => {
+      // Row background alternating
+      roundRect(rightX, rightY, rightW, 22, 3, BG, null);
       doc
-        .fontSize(7.5)
+        .fontSize(7)
         .font("Helvetica")
         .fillColor(LIGHT)
-        .text(d.label, dx, dy, { width: dColW - 8 });
+        .text(d.label, rightX + 6, rightY + 3, { width: rightW - 10 });
       doc
-        .fontSize(9.5)
+        .fontSize(8.5)
         .font("Helvetica-Bold")
         .fillColor(DARK)
-        .text(d.value || "N/A", dx, dy + 10, { width: dColW - 8 });
+        .text(truncate(d.value || "N/A", 20), rightX + 6, rightY + 12, {
+          width: rightW - 10,
+        });
+      rightY += 26;
     });
 
-    currentY += 70;
+    // Advance Y to after both columns
+    Y = Math.max(Y, rightY) + 10;
 
-    // ── DIVIDER ────────────────────────────────────────────────
+    // =====================================================
+    // AMENITIES / HIGHLIGHTS STRIP
+    // =====================================================
+    const highlights = [];
+    if (p.facilities?.bedrooms)
+      highlights.push(`${p.facilities.bedrooms} Bedrooms`);
+    if (p.facilities?.bathrooms)
+      highlights.push(`${p.facilities.bathrooms} Bathrooms`);
+    if (p.facilities?.parkings)
+      highlights.push(`${p.facilities.parkings} Parking`);
+    if (p.furnishing && p.furnishing !== "N/A") highlights.push(p.furnishing);
+    if (p.facing && p.facing !== "N/A") highlights.push(`${p.facing} Facing`);
+    if (p.availability) highlights.push(p.availability);
+
+    if (highlights.length > 0 && Y < H - 110) {
+      Y = sectionHeading("HIGHLIGHTS", Y);
+      let hx = M;
+      highlights.slice(0, 6).forEach((h) => {
+        const tw = doc.widthOfString(h, { fontSize: 8 }) + 18;
+        roundRect(hx, Y, tw, 20, 10, "#e0e7ff", null);
+        doc
+          .fontSize(8)
+          .font("Helvetica-Bold")
+          .fillColor(PRIMARY)
+          .text(h, hx + 6, Y + 6, { width: tw - 10 });
+        hx += tw + 6;
+        if (hx > W - M - 60) {
+          hx = M;
+          Y += 26;
+        }
+      });
+      Y += 28;
+    }
+
+    // =====================================================
+    // FOOTER
+    // =====================================================
+    const footerY = H - 58;
+
+    // Footer background strip
+    doc.rect(0, footerY, W, 58).fill("#f8fafc");
     doc
-      .moveTo(M, currentY)
-      .lineTo(W - M, currentY)
+      .moveTo(0, footerY)
+      .lineTo(W, footerY)
       .lineWidth(0.5)
-      .strokeColor(BORDER)
+      .strokeColor("#e5e7eb")
       .stroke();
 
-    // ── FOOTER ─────────────────────────────────────────────────
-    const footerY = H - 52;
+    // Left — contact info
     doc
-      .moveTo(M, footerY)
-      .lineTo(W - M, footerY)
-      .lineWidth(0.5)
-      .strokeColor(BORDER)
-      .stroke();
-
-    doc
-      .fontSize(8)
+      .fontSize(7.5)
       .font("Helvetica-Bold")
       .fillColor(DARK)
-      .text("Inquiry Contact:", M, footerY + 10);
-    doc
-      .fontSize(8)
-      .font("Helvetica")
-      .fillColor(LIGHT)
-      .text(
-        p.user?.phone
-          ? `📞 ${p.user.phone}   📧 ${p.user.email || "contact@propertybulbul.com"}`
-          : p.user?.email || "contact@propertybulbul.com",
-        M,
-        footerY + 21,
-      );
+      .text("INQUIRY CONTACT", M, footerY + 10);
+
+    const phone = p.user?.phone || "";
+    const email = p.user?.email || "contact@propertybulbul.com";
+    const contactLine = phone
+      ? `Ph: ${phone}    Email: ${email}`
+      : `Email: ${email}`;
 
     doc
       .fontSize(8)
       .font("Helvetica")
+      .fillColor(MUTED)
+      .text(contactLine, M, footerY + 21, { width: CW * 0.6 });
+
+    // Center divider
+    doc
+      .moveTo(W / 2, footerY + 8)
+      .lineTo(W / 2, footerY + 48)
+      .lineWidth(0.5)
+      .strokeColor("#e5e7eb")
+      .stroke();
+
+    // Right — brand
+    doc
+      .fontSize(7.5)
+      .font("Helvetica")
       .fillColor(LIGHT)
-      .text("Official Listing Brochure", W - M - 160, footerY + 10, {
-        width: 160,
+      .text("Official Property Brochure", W / 2 + 10, footerY + 10, {
+        width: W / 2 - M - 10,
         align: "right",
       });
     doc
-      .fontSize(9)
+      .fontSize(11)
       .font("Helvetica-Bold")
       .fillColor(PRIMARY)
-      .text("propertybulbul.com", W - M - 160, footerY + 21, {
-        width: 160,
+      .text("propertybulbul.com", W / 2 + 10, footerY + 22, {
+        width: W / 2 - M - 10,
+        align: "right",
+      });
+    doc
+      .fontSize(7)
+      .font("Helvetica")
+      .fillColor(LIGHT)
+      .text("Tricity's AI-Powered Property Search", W / 2 + 10, footerY + 37, {
+        width: W / 2 - M - 10,
         align: "right",
       });
 
+    // =====================================================
+    // WATERMARK
+    // =====================================================
+    doc
+      .save()
+      .translate(W / 2, H / 2 - 40)
+      .rotate(-42)
+      .fontSize(62)
+      .font("Helvetica-Bold")
+      .fillColor(PRIMARY)
+      .fillOpacity(0.025)
+      .text("PROPERTY BULBUL", -175, -30)
+      .restore();
+
+    doc.fillOpacity(1);
+
+    // Finalize
     doc.end();
     await pdfDone;
 
@@ -369,19 +532,16 @@ app.post("/generate-brochure", async (req, res) => {
     res.setHeader("Content-Length", pdfBuffer.length);
     res.send(pdfBuffer);
 
-    console.log(`✅ PDF generated for: ${p.title}`);
+    console.log(`PDF generated successfully: ${p.title}`);
   } catch (error) {
-    console.error("🚨 PDF Generation Error:", error.message);
-    res.status(500).json({
-      error: "Failed to generate PDF",
-      details: error.message,
-    });
+    console.error("PDF Generation Error:", error.message);
+    res
+      .status(500)
+      .json({ error: "Failed to generate PDF", details: error.message });
   }
 });
 
 app.get("/ping", (req, res) => res.status(200).send("pong"));
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => {
-  console.log(`✅ PDF Service active on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`PDF Service active on port ${PORT}`));
