@@ -538,5 +538,6 @@ app.post("/generate-brochure", async (req, res) => {
   }
 });
 app.get("/ping", (req, res) => res.status(200).send("pong"));
+
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`PDF Service active on port ${PORT}`));
